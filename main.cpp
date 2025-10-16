@@ -2,16 +2,22 @@
 #include "mpint/mpint.h"
 
 int main(int argc, const char **argv) {
-
     MPInt<1> a;
-    a = "5";
+    a = "-10";
 
-    MPInt<MPInt<0>::Unlimited> b;
-    b = "5";
+    MPInt<1> b;
+    b = "2";
 
-    auto c = a + b;
+    MPInt<2> c;
+    c = "2";
+
+    a += c;
+    auto d = a - b;
+
     std::cout << a <<std::endl;
     std::cout << b << std::endl;
     std::cout << c << std::endl;
+    std::cout << d << std::endl;
+
     return 0;
 }

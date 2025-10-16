@@ -44,6 +44,35 @@ public:
         return negative;
     }
 
+    MPInt& operator=(const MPInt& other) {
+        if (unlimited) {
+            data.clear();
+            data = other.getData();
+            negative = other.getNegative();
+            return *this;
+        }
+
+        /* clear data */
+        std::fill(data.begin(), data.end(), 0);
+
+        /* try to fill data, if cant, overflow error */
+        for (size_t i = 0; i < other.size(); i++) {
+            uint8_t byte = other.getDataOnPos(i);
+            if (byte == 0) {
+                continue;
+            }
+            /* cant squeeze into length */
+            if (i >= data.size()) {
+                throw std::overflow_error("MPInt overflow: number exceeds allowed byte size");
+            }
+            data[i] = byte;
+        }
+
+        negative = other.getNegative();
+
+        return *this;
+    }
+
     MPInt& operator=(std::string str) {
         /* erase all spaces */
         std::erase(str, ' ');
@@ -133,41 +162,60 @@ public:
 
     template<size_t OTHER_PRECISION>
     MPInt& operator+=(const MPInt<OTHER_PRECISION>& other) {
-        /* init carry */
-        uint16_t carry = 0;
-        const size_t this_len = data.size();
-        const size_t other_len = other.size();
-        /* max_data */
-        const size_t max_len = std::max(this_len, other_len);
-
-        /* for max_data_len */
-        for (size_t i = 0; i < max_len; ++i) {
-            const uint16_t this_byte = (i < this_len ? data[i] : 0);
-            const uint16_t other_byte = (i < other_len ? other.getDataOnPos(i) : 0);
-
-            /* sum of bytes plus carry */
-            uint16_t sum = this_byte + other_byte + carry;
-
-            /* check for overflow, already has initialized data.size in constructor */
-            if (PRECISION != Unlimited) {
-                if (i >= PRECISION) throw std::overflow_error("MPInt overflow in operator +=");
-                data[i] = static_cast<uint8_t>(sum & 0xFF);
-            }
-            /* if unlimited, just push_back */
-            else {
-                if (i >= data.size()) data.push_back(static_cast<uint8_t>(sum & 0xFF));
-                else data[i] = static_cast<uint8_t>(sum & 0xFF);
-            }
-
-            /* carry = 8bits that were not written to data */
-            carry = sum >> 8;
+        /* if same negative, just add, addAbs controls overflow */
+        if (negative == other.getNegative()) {
+            addAbs(other);
         }
+        else {
+            /* no risk of overflow here */
+            if (absGreaterOrEqual(other)) {
+                subAbs(other);
+            }
+            /* risk of overflow */
+            else {
+                /* create tmp with bigger precision */
+                MPInt<(PRECISION >= OTHER_PRECISION ? PRECISION : OTHER_PRECISION)> tmp;
+                /* fill with bigger value */
+                tmp = other;
+                /* sub smaller value -> negative cannot change */
+                tmp.subAbs(*this);
+                /* try to "push" bigger value into smaller precision, if cant, overflow error */
+                try {
+                    *this = tmp;
+                    negative = tmp.getNegative();
+                } catch (const std::overflow_error&) {
+                    throw std::overflow_error("MPInt overflow in operator +=");
+                }
+            }
+        }
+        /* return new this */
+        return *this;
+    }
 
-        /* carry in last byte, if happened in limited -> overflow, else just push_back */
-        if (carry != 0) {
-            if (PRECISION != Unlimited)
-                    throw std::overflow_error("MPInt overflow in operator+=");
-            data.push_back(static_cast<uint8_t>(carry));
+    template<size_t OTHER_PRECISION>
+    MPInt& operator-=(const MPInt<OTHER_PRECISION>& other) {
+        if (negative == other.negative) {
+            if (absGreaterOrEqual(other)) {
+                subAbs(other);
+            }
+            else {
+                /* create tmp with bigger precision */
+                MPInt<(PRECISION >= OTHER_PRECISION ? PRECISION : OTHER_PRECISION)> tmp;
+                /* fill with bigger value */
+                tmp = other;
+                /* sub smaller value -> negative cannot change */
+                tmp.subAbs(*this);
+                /* try to "push" bigger value into smaller precision, if cant, overflow error */
+                try {
+                    *this = tmp;
+                    negative = tmp.getNegative();
+                } catch (const std::overflow_error&) {
+                    throw std::overflow_error("MPInt overflow in operator -=");
+                }
+            }
+        }
+        else {
+            addAbs(other);
         }
 
         return *this;
@@ -222,6 +270,99 @@ private:
     bool negative = false;
     bool unlimited = false;
     std::vector<uint8_t> data;
+
+    template<size_t OTHER_PRECISION>
+    friend class MPInt;
+
+    MPInt& addAbs(const MPInt& other) {
+        /* init carry */
+        uint16_t carry = 0;
+        const size_t this_len = data.size();
+        const size_t other_len = other.size();
+        /* max_data */
+        const size_t max_len = std::max(this_len, other_len);
+
+        /* for max_data_len */
+        for (size_t i = 0; i < max_len; ++i) {
+            const uint16_t this_byte = (i < this_len) ? data[i] : 0;
+            const uint16_t other_byte = (i < other_len) ? other.getDataOnPos(i) : 0;
+
+            /* sum of bytes plus carry */
+            uint16_t sum = this_byte + other_byte + carry;
+
+            /* check for overflow, already has initialized data.size in constructor */
+            if (PRECISION != Unlimited) {
+                if (i >= PRECISION && sum != 0) throw std::overflow_error("MPInt overflow in operator +=");
+                data[i] = static_cast<uint8_t>(sum & 0xFF);
+            }
+            /* if unlimited, just push_back */
+            else {
+                if (i >= data.size()) data.push_back(static_cast<uint8_t>(sum & 0xFF));
+                else data[i] = static_cast<uint8_t>(sum & 0xFF);
+            }
+
+            /* carry = 8bits that were not written to data */
+            carry = sum >> 8;
+        }
+
+        /* carry in last byte, if happened in limited -> overflow, else just push_back */
+        if (carry != 0) {
+            if (PRECISION != Unlimited)
+                throw std::overflow_error("MPInt overflow in operator+=");
+            data.push_back(static_cast<uint8_t>(carry));
+        }
+
+        return *this;
+    }
+
+    MPInt& subAbs(const MPInt& other) {
+        /* functin assumes that absolute value of this MPInt is greater than other */
+
+        /* declare borrow */
+        int16_t borrow = 0;
+        /* this len is greater or equal to other len */
+        const size_t this_len = data.size();
+        const size_t other_len = other.size();
+
+        for (size_t i = 0; i < this_len; ++i) {
+            const int16_t this_byte = data[i];
+            const int16_t other_byte = (i < other_len) ? other.getDataOnPos(i) : 0;
+
+            int16_t diff = this_byte - other_byte - borrow;
+
+            /* if diff overflowed to next byte */
+            if (diff < 0) {
+                /* shift diff */
+                diff += 256;
+                /* set borrow to next */
+                borrow = 1;
+            }
+            else {
+                borrow = 0;
+            }
+
+            data[i] = static_cast<uint8_t>(diff & 0xFF);
+        }
+
+        return *this;
+    }
+
+    bool absGreaterOrEqual(const MPInt& other) const {
+        const size_t this_len = data.size();
+        const size_t other_len = other.size();
+        const size_t max_len = std::max(this_len, other_len);
+
+        for (int i = max_len - 1; i >= 0; --i) {
+            const uint8_t this_byte = (i < this_len) ? data[i] : 0;
+            const uint8_t other_byte = (i < other_len) ? other.getDataOnPos(i) : 0;
+            if (this_byte > other_byte)
+                return true;
+            if (this_byte < other_byte)
+                return false;
+        }
+
+        return true;
+    }
 };
 
 template <size_t PREC_A, size_t PREC_B>
@@ -231,10 +372,27 @@ auto operator+(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
         MPInt<MPInt<PREC_A>::Unlimited> result(a);
         result += b;
         return result;
-    } else {
+    }
+    else {
         constexpr size_t MaxBytes = (PREC_A > PREC_B ? PREC_A : PREC_B);
         MPInt<MaxBytes> result(a);
         result += b;
+        return result;
+    }
+}
+
+template <size_t PREC_A, size_t PREC_B>
+auto operator-(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
+    constexpr bool anyUnlimited = (PREC_A == MPInt<PREC_A>::Unlimited || PREC_B == MPInt<PREC_B>::Unlimited);
+    if constexpr (anyUnlimited) {
+        MPInt<MPInt<PREC_A>::Unlimited> result(a);
+        result -= b;
+        return result;
+    }
+    else {
+        constexpr size_t MaxBytes = (PREC_A > PREC_B ? PREC_A : PREC_B);
+        MPInt<MaxBytes> result(a);
+        result -= b;
         return result;
     }
 }
