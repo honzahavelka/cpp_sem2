@@ -6,18 +6,18 @@ int main(int argc, const char **argv) {
     a = "-10";
 
     MPInt<1> b;
-    b = "2";
+    b = "25";
 
     MPInt<2> c;
     c = "2";
 
-    a += c;
-    auto d = a - b;
 
     std::cout << a <<std::endl;
     std::cout << b << std::endl;
     std::cout << c << std::endl;
-    std::cout << d << std::endl;
+
+    auto e = a * b;
+    std::cout << e << std::endl;
 
     return 0;
 }

@@ -179,7 +179,7 @@ public:
                 tmp = other;
                 /* sub smaller value -> negative cannot change */
                 tmp.subAbs(*this);
-                /* try to "push" bigger value into smaller precision, if cant, overflow error */
+                /* try to "push" bigger value into maybe smaller precision, if cant, overflow error */
                 try {
                     *this = tmp;
                     negative = tmp.getNegative();
@@ -194,10 +194,13 @@ public:
 
     template<size_t OTHER_PRECISION>
     MPInt& operator-=(const MPInt<OTHER_PRECISION>& other) {
+        /* if same negative */
         if (negative == other.negative) {
+            /* no risk of overflow here */
             if (absGreaterOrEqual(other)) {
                 subAbs(other);
             }
+            /* risk of overflow */
             else {
                 /* create tmp with bigger precision */
                 MPInt<(PRECISION >= OTHER_PRECISION ? PRECISION : OTHER_PRECISION)> tmp;
@@ -205,7 +208,7 @@ public:
                 tmp = other;
                 /* sub smaller value -> negative cannot change */
                 tmp.subAbs(*this);
-                /* try to "push" bigger value into smaller precision, if cant, overflow error */
+                /* try to "push" bigger value into maybe smaller precision, if cant, overflow error */
                 try {
                     *this = tmp;
                     negative = tmp.getNegative();
@@ -218,6 +221,77 @@ public:
             addAbs(other);
         }
 
+        return *this;
+    }
+
+    template<size_t OTHER_PRECISION>
+    MPInt& operator *=(const MPInt<OTHER_PRECISION>& other) {
+        /* get sizes */
+        const size_t this_len = data.size();
+        const size_t other_len = other.size();
+
+        /* if all zeros for one number, return 0 */
+        bool zeroA = std::all_of(data.begin(), data.end(), [](uint8_t b){ return b == 0; });
+        bool zeroB = std::all_of(other.getData().begin(), other.getData().end(), [](uint8_t b){ return b == 0; });
+        if (zeroA || zeroB) {
+            std::fill(data.begin(), data.end(), 0);
+            negative = false;
+            return *this;
+        }
+
+        /* init result */
+        const size_t result_len = this_len + other_len;
+        std::vector<uint8_t> result(result_len, 0);
+
+        /* multiply like in school */
+        for (size_t i = 0; i < this_len; ++i) {
+            uint16_t carry = 0;
+            for (size_t j = 0; j < other_len; ++j) {
+                const size_t pos = i + j;
+                const uint16_t multiply = static_cast<uint16_t>(data[pos])
+                                        * static_cast<uint16_t>(other.getDataOnPos(j))
+                                        + result[pos] + carry;
+
+                /* load last 8 bits */
+                result[pos] = static_cast<uint8_t>(multiply & 0xFF);
+                /* first eight into carry */
+                carry = multiply >> 8;
+            }
+
+            /* for last inside for */
+            if (carry > 0) {
+                const size_t pos = i + other_len;
+                /* in case there is a carry in last for */
+                if (pos < result.size())
+                    result[pos] += static_cast<uint8_t>(carry);
+                else
+                    result.push_back(static_cast<uint8_t>(carry));
+            }
+        }
+
+        /* move result into data */
+        if (PRECISION == Unlimited)
+            data = std::move(result);
+        else {
+            /* zero */
+            std::fill(data.begin(), data.end(), 0);
+
+            /* try to fill data, if cant, overflow error */
+            for (size_t i = 0; i < result_len; i++) {
+                uint8_t byte = result[i];
+                if (byte == 0) {
+                    continue;
+                }
+                /* cant squeeze into length */
+                if (i >= data.size()) {
+                    throw std::overflow_error("MPInt overflow in operator *=");
+                }
+                data[i] = byte;
+            }
+        }
+
+        /* is negative? */
+        this->negative = this->negative != other.negative;
         return *this;
     }
 
@@ -271,9 +345,6 @@ private:
     bool unlimited = false;
     std::vector<uint8_t> data;
 
-    template<size_t OTHER_PRECISION>
-    friend class MPInt;
-
     MPInt& addAbs(const MPInt& other) {
         /* init carry */
         uint16_t carry = 0;
@@ -315,9 +386,8 @@ private:
         return *this;
     }
 
+    /* function assumes that absolute value of this MPInt is greater than other */
     MPInt& subAbs(const MPInt& other) {
-        /* functin assumes that absolute value of this MPInt is greater than other */
-
         /* declare borrow */
         int16_t borrow = 0;
         /* this len is greater or equal to other len */
@@ -396,5 +466,22 @@ auto operator-(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
         return result;
     }
 }
+
+template <size_t PREC_A, size_t PREC_B>
+auto operator*(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
+    constexpr bool anyUnlimited = (PREC_A == MPInt<PREC_A>::Unlimited || PREC_B == MPInt<PREC_B>::Unlimited);
+    if constexpr (anyUnlimited) {
+        MPInt<MPInt<PREC_A>::Unlimited> result(a);
+        result *= b;
+        return result;
+    }
+    else {
+        constexpr size_t MaxBytes = (PREC_A > PREC_B ? PREC_A : PREC_B);
+        MPInt<MaxBytes> result(a);
+        result *= b;
+        return result;
+    }
+}
+
 
 #endif
