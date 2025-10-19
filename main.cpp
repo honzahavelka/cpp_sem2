@@ -2,22 +2,29 @@
 #include "mpint/mpint.h"
 
 int main(int argc, const char **argv) {
+
     MPInt<1> a;
     a = "-10";
+    MPInt<2> b;
+    b = "-219";
 
-    MPInt<1> b;
-    b = "25";
+    int x = -10;
+    int y = -219;
+    int z = y / x;
 
-    MPInt<2> c;
-    c = "2";
+    auto c = b / a;
 
-
-    std::cout << a <<std::endl;
+    b %= a;
+    y %= x;
     std::cout << b << std::endl;
+    std::cout << y << std::endl;
     std::cout << c << std::endl;
+    std::cout << z << std::endl;
 
-    auto e = a * b;
-    std::cout << e << std::endl;
+
+    MPInt<MPInt<1>::Unlimited> d;
+    d = "1 000 000 000 000 000 000";
+
 
     return 0;
 }
