@@ -1,6 +1,7 @@
 #ifndef SEM_2_MPINT_H
 #define SEM_2_MPINT_H
 
+#include <cassert>
 #include <cstddef>
 #include <vector>
 
@@ -16,70 +17,86 @@ public:
             data.resize(PRECISION);
         }
         else {
-            unlimited = true;
+            data.resize(0);
         }
     }
 
-    /* getters */
-    size_t size() const {
-        return data.size();
-    }
-    const uint8_t getDataOnPos(size_t index) const {
-        return data[index];
-    }
-    std::vector<uint8_t> getData() const {
-        return data;
-    }
-    bool getUnlimited() const {
-        return unlimited;
-    }
-    bool getNegative() const {
-        return negative;
-    }
+    ~MPInt() = default;
 
+    /* copy constructor */
+    template<size_t OTHER_PRECISION>
+    MPInt(const MPInt<OTHER_PRECISION>& other) : MPInt() {
+        setData(other.getData(), other.getNegative());
+    }
+    /* copy assignment */
     template<size_t OTHER_PRECISION>
     MPInt& operator=(const MPInt<OTHER_PRECISION>& other) {
         setData(other.getData(), other.getNegative());
         return *this;
     }
+    /* move constructor */
+    template<size_t OTHER_PRECISION>
+    MPInt(MPInt<OTHER_PRECISION>&& other) : MPInt() {
+        setData(other.getData(), other.getNegative());
+        other.clearData();
+    }
+    /* move assignment */
+    template<size_t OTHER_PRECISION>
+    MPInt& operator=(MPInt<OTHER_PRECISION>&& other) {
+        setData(other.getData(), other.getNegative());
+        other.clearData();
+        return *this;
+    }
 
+    /* fill data from string */
     MPInt& operator=(std::string str) {
-        // odstranění mezer
+        /* get rid of spaces */
         str.erase(std::remove(str.begin(), str.end(), ' '), str.end());
 
+        /* if string is empty, throw invalid arg */
         if (str.empty()) {
             throw std::invalid_argument("MPInt argument is empty");
         }
 
-        // kontrola znaménka
+        /* check minus */
         negative = false;
         if (str[0] == '-') {
             negative = true;
             str = str.substr(1);
         }
 
-        // inicializace prázdného data vektoru
-        data.clear();
+        /*c lear data */
+        if (PRECISION == Unlimited)
+            data.clear();
+        else
+            std::fill(data.begin(), data.end(), 0);
 
-        // binární převod stringu na vektor uint8_t (little endian)
-        std::vector<uint8_t> tmp;
+        /* for every character in string */
         for (char c : str) {
+            /* if it's not a number, throw invalid arg */
             if (c < '0' || c > '9') throw std::invalid_argument("Invalid character in MPInt string");
             int digit = c - '0';
 
-            // násobíme existující číslo 10 a přidáme novou cifru
             int carry = digit;
-            for (size_t i = 0; i < tmp.size(); ++i) {
-                int val = tmp[i] * 10 + carry;
-                tmp[i] = val & 0xFF;     // uložíme dolních 8 bitů
-                carry = val >> 8;        // zbytek do carry
+            /* push into data */
+            for (size_t i = 0; i < data.size(); ++i) {
+                int val = data[i] * 10 + carry;
+                data[i] = val & 0xFF;
+                carry = val >> 8;
             }
-            if (carry > 0) tmp.push_back(carry);
+            /* risk of overflow */
+            if (carry > 0) {
+                if (PRECISION == Unlimited)
+                    data.push_back(carry);
+                /* take care */
+                else
+                    throw std::overflow_error("MPI overflow");
+            }
         }
 
-        // uložíme do dat
-        data = std::move(tmp);
-
+        if (isZero()) {
+            negative = false;
+        }
         return *this;
     }
 
@@ -91,7 +108,7 @@ public:
         }
         else {
             /* no risk of overflow here */
-            if (absGreaterOrEqual(other)) {
+            if (compareAbs(other) > -1) {
                 subAbs(other);
             }
             /* risk of overflow */
@@ -120,7 +137,7 @@ public:
         /* if same negative */
         if (negative == other.getNegative()) {
             /* no risk of overflow here */
-            if (absGreaterOrEqual(other)) {
+            if (compareAbs(other) > -1) {
                 subAbs(other);
             }
             /* risk of overflow */
@@ -194,7 +211,7 @@ public:
         }
 
         /* move result into data */
-        if (PRECISION == unlimited)
+        if (PRECISION == Unlimited)
             data = std::move(result);
         else {
             /* zero */
@@ -232,30 +249,54 @@ public:
         return *this;
     }
 
+    template<size_t OTHER_PRECISION>
+    int compareAbs(const MPInt<OTHER_PRECISION>& other) const {
+        const size_t this_len = data.size();
+        const size_t other_len = other.size();
+        const size_t max_len = std::max(this_len, other_len);
 
-    std::string toString() const {
-        if (std::all_of(data.begin(), data.end(), [](uint8_t b){ return b == 0; }))
-            return "0";
-
-        MPInt<MPInt<PRECISION>::Unlimited> temp;
-        temp = *this;
-
-        MPInt<1> ten;
-        ten = "10";
-
-        std::string digits;
-
-        while (!temp.isZero()) {
-            MPInt<MPInt<PRECISION>::Unlimited> remainder = temp.absDiv(ten); // temp /= 10, remainder = temp % 10
-            digits.push_back('0' + remainder.getDataOnPos(0)); // převod na znak
+        for (int i = max_len - 1; i >= 0; --i) {
+            const uint8_t this_byte = (i < this_len) ? data[i] : 0;
+            const uint8_t other_byte = (i < other_len) ? other.getDataOnPos(i) : 0;
+            if (this_byte > other_byte)
+                return 1;
+            if (this_byte < other_byte)
+                return -1;
         }
 
-        std::reverse(digits.begin(), digits.end()); // cifry byly od nejnižší po nejvyšší
+        return 0;
+    }
 
-        if (negative)
-            digits.insert(digits.begin(), '-');
+    MPInt<PRECISION> factorial() {
+        if (negative) {
+            throw std::invalid_argument("MPInt factorial of negative number is undefined.");
+        }
 
-        return digits;
+        if (isZero()) {
+            MPInt<PRECISION> result;
+            result = "1";
+            return result;
+        }
+
+        MPInt<1> one;
+        one = "1";
+
+        MPInt<PRECISION> result;
+        result = "1";
+
+        MPInt<PRECISION> counter;
+        counter = "2";
+
+        while (counter <= *this) {
+            try {
+                result *= counter;
+            } catch (const std::overflow_error&) {
+                throw std::overflow_error("MPInt overflow in factorial");
+            }
+            counter += one;
+        }
+
+        return result;
     }
 
     friend std::ostream& operator<<(std::ostream& os, const MPInt<PRECISION>& num) {
@@ -263,20 +304,37 @@ public:
         return os;
     }
 
+    /* getters */
+    size_t size() const {
+        return data.size();
+    }
+    const uint8_t getDataOnPos(size_t index) const {
+        return data[index];
+    }
+    std::vector<uint8_t> getData() const {
+        return data;
+    }
+    bool getUnlimited() const {
+        return PRECISION == Unlimited;
+    }
+    bool getNegative() const {
+        return negative;
+    }
+
 
 private:
     bool negative = false;
-    bool unlimited = false;
     std::vector<uint8_t> data;
 
     template<size_t OTHER_PRECISION>
     friend class MPInt;
 
     void setData(const std::vector<uint8_t>& other, bool other_negative) {
-        if (unlimited) {
+        if constexpr (PRECISION == Unlimited) {
             data.clear();
             data = other;
             negative = other_negative;
+            return;
         }
 
         /* clear data */
@@ -297,6 +355,16 @@ private:
         negative = other_negative;
     }
 
+    void clearData() {
+        negative = false;
+        if constexpr (PRECISION == Unlimited) {
+            data.clear();
+        }
+        else {
+            std::fill(data.begin(), data.end(), 0);
+        }
+    }
+
     template<size_t OTHER_PRECISION>
     void addAbs(const MPInt<OTHER_PRECISION>& other) {
         /* init carry */
@@ -315,7 +383,7 @@ private:
             uint16_t sum = this_byte + other_byte + carry;
 
             /* check for overflow, already has initialized data.size in constructor */
-            if (!unlimited) {
+            if (PRECISION != Unlimited) {
                 if (i >= data.size() && sum != 0) throw std::overflow_error("MPInt overflow in operator +=");
                 data[i] = static_cast<uint8_t>(sum & 0xFF);
             }
@@ -331,7 +399,7 @@ private:
 
         /* carry in last byte, if happened in limited -> overflow, else just push_back */
         if (carry != 0) {
-            if (PRECISION != unlimited)
+            if (PRECISION != Unlimited)
                 throw std::overflow_error("MPInt overflow in operator+=");
             data.push_back(static_cast<uint8_t>(carry));
         }
@@ -375,7 +443,7 @@ private:
         }
 
         /* other is larger than this, return reminder this and set all zero */
-        if (!absGreaterOrEqual(other)) {
+        if (compareAbs(other) == -1) {
             MPInt<PRECISION> remainder;
             remainder = *this;
             std::fill(data.begin(), data.end(), 0);
@@ -399,7 +467,7 @@ private:
             MPInt<PRECISION> rem;
             rem.setData(remainder_data, false);
 
-            while (rem.absGreaterOrEqual(other)) {
+            while (rem.compareAbs(other) > -1) {
                 rem.subAbs(other);
                 q++;
             }
@@ -413,28 +481,36 @@ private:
         return remainder;
     }
 
-    template<size_t OTHER_PRECISION>
-    bool absGreaterOrEqual(const MPInt<OTHER_PRECISION>& other) const {
-        const size_t this_len = data.size();
-        const size_t other_len = other.size();
-        const size_t max_len = std::max(this_len, other_len);
-
-        for (int i = max_len - 1; i >= 0; --i) {
-            const uint8_t this_byte = (i < this_len) ? data[i] : 0;
-            const uint8_t other_byte = (i < other_len) ? other.getDataOnPos(i) : 0;
-            if (this_byte > other_byte)
-                return true;
-            if (this_byte < other_byte)
-                return false;
-        }
-
-        return true;
-    }
-
     bool isZero() const {
         return std::all_of(data.begin(), data.end(), [](uint8_t b) {
             return b == 0;
         });
+    }
+
+    std::string toString() const {
+        if (data.empty() || std::all_of(data.begin(), data.end(), [](uint8_t b){ return b == 0; }))
+            return "0";
+
+
+        MPInt<PRECISION> temp;
+        temp = *this;
+
+        MPInt<1> ten;
+        ten = "10";
+
+        std::string digits;
+
+        while (!temp.isZero()) {
+            MPInt<PRECISION> remainder = temp.absDiv(ten); // temp /= 10, remainder = temp % 10
+            digits.push_back('0' + remainder.getDataOnPos(0)); // převod na znak
+        }
+
+        std::reverse(digits.begin(), digits.end()); // cifry byly od nejnižší po nejvyšší
+
+        if (negative)
+            digits.insert(digits.begin(), '-');
+
+        return digits;
     }
 };
 
@@ -442,15 +518,13 @@ template <size_t PREC_A, size_t PREC_B>
 auto operator+(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
     constexpr bool anyUnlimited = (PREC_A == MPInt<PREC_A>::Unlimited || PREC_B == MPInt<PREC_B>::Unlimited);
     if constexpr (anyUnlimited) {
-        MPInt<MPInt<PREC_A>::Unlimited> result;
-        result = a;
+        MPInt<MPInt<PREC_A>::Unlimited> result = a;
         result += b;
         return result;
     }
     else {
         constexpr size_t MaxBytes = (PREC_A > PREC_B ? PREC_A : PREC_B);
-        MPInt<MaxBytes> result;
-        result = a;
+        MPInt<MaxBytes> result = a;
         result += b;
         return result;
     }
@@ -460,15 +534,13 @@ template <size_t PREC_A, size_t PREC_B>
 auto operator-(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
     constexpr bool anyUnlimited = (PREC_A == MPInt<PREC_A>::Unlimited || PREC_B == MPInt<PREC_B>::Unlimited);
     if constexpr (anyUnlimited) {
-        MPInt<MPInt<PREC_A>::Unlimited> result;
-        result = a;
+        MPInt<MPInt<PREC_A>::Unlimited> result = a;
         result -= b;
         return result;
     }
     else {
         constexpr size_t MaxBytes = (PREC_A > PREC_B ? PREC_A : PREC_B);
-        MPInt<MaxBytes> result;
-        result = a;
+        MPInt<MaxBytes> result = a;
         result -= b;
         return result;
     }
@@ -478,15 +550,13 @@ template <size_t PREC_A, size_t PREC_B>
 auto operator*(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
     constexpr bool anyUnlimited = (PREC_A == MPInt<PREC_A>::Unlimited || PREC_B == MPInt<PREC_B>::Unlimited);
     if constexpr (anyUnlimited) {
-        MPInt<MPInt<PREC_A>::Unlimited> result;
-        result = a;
+        MPInt<MPInt<PREC_A>::Unlimited> result = a;
         result *= b;
         return result;
     }
     else {
         constexpr size_t MaxBytes = (PREC_A > PREC_B ? PREC_A : PREC_B);
-        MPInt<MaxBytes> result;
-        result = a;
+        MPInt<MaxBytes> result = a;
         result *= b;
         return result;
     }
@@ -496,15 +566,13 @@ template <size_t PREC_A, size_t PREC_B>
 auto operator/(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
     constexpr bool anyUnlimited = (PREC_A == MPInt<PREC_A>::Unlimited || PREC_B == MPInt<PREC_B>::Unlimited);
     if constexpr (anyUnlimited) {
-        MPInt<MPInt<PREC_A>::Unlimited> result;
-        result = a;
+        MPInt<MPInt<PREC_A>::Unlimited> result = a;
         result /= b;
         return result;
     }
     else {
         constexpr size_t MaxBytes = (PREC_A > PREC_B ? PREC_A : PREC_B);
-        MPInt<MaxBytes> result;
-        result = a;
+        MPInt<MaxBytes> result = a;
         result /= b;
         return result;
     }
@@ -514,19 +582,50 @@ template <size_t PREC_A, size_t PREC_B>
 auto operator%(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
     constexpr bool anyUnlimited = (PREC_A == MPInt<PREC_A>::Unlimited || PREC_B == MPInt<PREC_B>::Unlimited);
     if constexpr (anyUnlimited) {
-        MPInt<MPInt<PREC_A>::Unlimited> result;
-        result = a;
+        MPInt<MPInt<PREC_A>::Unlimited> result = a;
         result %= b;
         return result;
     }
     else {
         constexpr size_t MaxBytes = (PREC_A > PREC_B ? PREC_A : PREC_B);
-        MPInt<MaxBytes> result;
-        result = a;
+        MPInt<MaxBytes> result = a;
         result %= b;
         return result;
     }
 }
 
 
+template <size_t PREC_A, size_t PREC_B>
+bool operator==(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
+    if constexpr (a.getNegative() != b.getNegative()) return false;
+    return a.compareAbs(b) == 0;
+}
+
+template <size_t PREC_A, size_t PREC_B>
+bool operator!=(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
+    return a.compareAbs(b) != 0;
+}
+
+template <size_t PREC_A, size_t PREC_B>
+bool operator<(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
+    if (a.getNegative() && !b.getNegative()) return true;
+    if (!a.getNegative() && b.getNegative()) return false;
+    int cmp = a.compareAbs(b);
+    return a.getNegative() ? (cmp > 0) : (cmp < 0);
+}
+
+template <size_t PREC_A, size_t PREC_B>
+bool operator>(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
+    return b < a;
+}
+
+template <size_t PREC_A, size_t PREC_B>
+bool operator<=(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
+    return !(a > b);
+}
+
+template <size_t PREC_A, size_t PREC_B>
+bool operator>=(const MPInt<PREC_A>& a, const MPInt<PREC_B>& b) {
+    return !(a < b);
+}
 #endif
