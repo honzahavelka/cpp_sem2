@@ -211,14 +211,19 @@ public:
         }
 
         /* move result into data */
-        if (PRECISION == Unlimited)
+        if (PRECISION == Unlimited) {
+            /* get rid of unused zeros */
+            while (result.back() == 0) {
+               result.pop_back();
+            }
             data = std::move(result);
+        }
         else {
             /* zero */
             std::fill(data.begin(), data.end(), 0);
 
             /* try to fill data, if cant, overflow error */
-            for (size_t i = 0; i < result_len; i++) {
+            for (size_t i = 0; i < result.size(); i++) {
                 uint8_t byte = result[i];
                 if (byte == 0) {
                     continue;
