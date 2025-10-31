@@ -51,6 +51,7 @@ private:
            line.end());
     }
 
+    //TODO: solve unary minus
     std::vector<std::string> getTokensFromLine(const std::string& line) {
         std::vector<std::string> tokens;
         std::string token;
@@ -80,6 +81,14 @@ private:
             /* must be operator */
             if (flag) {
                 tokens.push_back(token);
+            }
+            else {
+                /* is unary minus */
+                //TODO: this works just for one unary minus, might let it be like this
+                if (line[i] == '-') {
+                    token += line[i];
+                    continue;
+                }
             }
             token = line[i];
             tokens.push_back(token);
@@ -113,18 +122,12 @@ private:
                 return true;
             }
 
-            /* factorial or save negative numer */
+            /* factorial */
             if (tokens.size() == 2) {
                 /* factorial */
                 if (tokens[1] == "!") {
                     MPInt<TERM_PRECISION> value = parseToken(tokens[0]);
                     saveResult(computeFactorial(value));
-                    return true;
-                }
-                /* save negative number */
-                if (tokens[0] == "-") {
-                    MPInt<TERM_PRECISION> value = parseToken(tokens[0] + tokens[1]);
-                    saveResult(value);
                     return true;
                 }
                 return false;
@@ -134,9 +137,9 @@ private:
             if (tokens.size() == 3) {
                 /* factorial from history */
                 if (tokens[0] == "$" && tokens[2] == "!") {
+                    /* get index from line */
                     int index = std::stoi(tokens[1]) - 1;
-                    if (index < 0 || index >= history.size() || !history[index]) {
-                        std::cout << "Neplatný nebo prázdný index." << std::endl;
+                    if (!checkIndex(index)) {
                         return false;
                     }
                     saveResult(computeFactorial(*history[index]));
@@ -149,12 +152,51 @@ private:
                 saveResult(computeOperator(a, tokens[1], b));
                 return true;
             }
+
+            /* mixed expression with history and normal number $1+1 */
+            if (tokens.size() == 4) {
+                /* which is history? */
+                int index, op_pos, num_pos;
+                if (tokens[0] == "$") {
+                    index = std::stoi(tokens[1]) - 1;
+                    op_pos = 2;
+                    num_pos = 3;
+                }
+                else if (tokens[2] == "$") {
+                    index = std::stoi(tokens[3]) - 1;
+                    op_pos = 1;
+                    num_pos = 0;
+                }
+                else
+                    return false;
+
+                if (!checkIndex(index)) {
+                    return false;
+                }
+                MPInt<TERM_PRECISION> a = parseToken(tokens[num_pos]);
+                saveResult(computeOperator(a, tokens[op_pos], *history[index]));
+                return true;
+            }
+
+            /* compute both numbers from history $1+$2*/
+            if (tokens.size() == 5) {
+                int left_index, right_index;
+                left_index = std::stoi(tokens[1]) - 1;
+                right_index = std::stoi(tokens[4]) - 1;
+
+                if (!checkIndex(left_index) || !checkIndex(right_index)) {
+                    return false;
+                }
+
+                saveResult(computeOperator(*history[left_index], tokens[2],*history[right_index]));
+                return true;
+            }
         }
         catch (const std::exception& e) {
+            /* print exception, return false */
             std::cout << e.what() << std::endl;
-            return false;
         }
-        return true;
+        return false;
     }
 
     MPInt<TERM_PRECISION> parseToken(const std::string& token) {
@@ -192,6 +234,14 @@ private:
         for (int i = static_cast<int>(history.size()) - 1; i > 0; --i) {
             history[i] = std::move(history[i - 1]);
         }
+    }
+
+    bool checkIndex(const int& index) {
+        if (index < 0 || index >= history.size() || !history[index]) {
+            std::cout << "Neplatný nebo prázdný index." << std::endl;
+            return false;
+        }
+        return true;
     }
 };
 
