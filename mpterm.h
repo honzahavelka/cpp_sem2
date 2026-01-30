@@ -1,10 +1,15 @@
 #ifndef SEM_2_MPTERM_H
 #define SEM_2_MPTERM_H
 
-#include <array>
 #include <iostream>
+#include <vector>
+#include <string>
+#include <array>
+#include <memory>
 #include <regex>
-
+#include <exception>
+#include <cctype>
+#include <algorithm>
 #include "mpint.h"
 
 /*
