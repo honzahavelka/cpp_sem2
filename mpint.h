@@ -383,7 +383,7 @@ public:
         const size_t other_len = other.size();
         const size_t max_len = std::max(this_len, other_len);
 
-        for (int i = max_len - 1; i >= 0; --i) {
+        for (int i = static_cast<int>(max_len) - 1; i >= 0; --i) {
             const uint8_t this_byte = (i < this_len) ? data[i] : 0;
             const uint8_t other_byte = (i < other_len) ? other.data[i] : 0;
             // jakmile je ten byte větší - víme že je to číslo větší

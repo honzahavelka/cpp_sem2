@@ -194,7 +194,7 @@ void runTestSuite() {
             try {
                 limit += unlim;
                 printResult(false, "Melo pretect (100+5000 do 1B)");
-            } catch (const MPInt<1>::OverflowException& e) {
+            } catch (const MPInt<1>::OverflowException&) {
                 printResult(true, "Zachyceno preteceni Limited += Unlimited");
             }
 
