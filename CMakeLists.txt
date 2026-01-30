@@ -4,5 +4,5 @@ project(sem_2)
 set(CMAKE_CXX_STANDARD 20)
 
 add_executable(sem_2 main.cpp
-        mpint/mpint.h
-        mpterm/mpterm.h)
+                     mpint.h
+                     mpterm.h)
