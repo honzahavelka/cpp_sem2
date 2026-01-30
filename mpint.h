@@ -1,8 +1,18 @@
 #ifndef SEM_2_MPINT_H
 #define SEM_2_MPINT_H
 
-#include <cassert>
+#include <iostream>
 #include <vector>
+#include <string>
+#include <array>
+#include <algorithm>
+#include <iomanip>
+#include <stdexcept>
+#include <cstdint>
+#include <type_traits>
+#include <utility>
+#include <compare>
+#include <iterator>
 
 template<size_t PRECISION>
 class MPInt {
