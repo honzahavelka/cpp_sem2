@@ -1,6 +1,7 @@
 #include "mpterm.h"
 
 #include <charconv>
+#include <cstring>
 
 void printModeHelp() {
     std::cout << "mode <1> pro neomezenou presnost." << std::endl;
